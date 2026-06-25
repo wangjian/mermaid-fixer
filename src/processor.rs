@@ -75,6 +75,10 @@ impl MermaidProcessor {
     }
 
     async fn process_file(&self, file_path: &PathBuf, dry_run: bool) -> Result<FileProcessResult, Box<dyn std::error::Error>> {
+        // 打印正在处理的文件名（无论 verbose 与否）
+        if !self.verbose {
+            println!("📝 正在修复: {}", file_path.display());
+        }
         // 读取文件内容
         let content = std::fs::read_to_string(file_path)?;
 
@@ -98,7 +102,8 @@ impl MermaidProcessor {
         let mut new_content = content.clone();
 
         // 验证每个mermaid代码块
-        for (index, (_start_pos, _end_pos, mermaid_code)) in mermaid_blocks.iter().enumerate() {
+        // 从后往前遍历，避免前面替换导致位置偏移
+        for (index, (start_pos, end_pos, mermaid_code)) in mermaid_blocks.iter().enumerate().rev() {
             if self.verbose {
                 println!("      📊 验证代码块 {}/{}", index + 1, mermaid_blocks.len());
             }
@@ -126,10 +131,25 @@ impl MermaidProcessor {
                                     match validator.validate(&fixed_code) {
                                         Ok(_) => {
                                             if self.verbose {
-                                                println!("         🔧 修复成功");
+                                                println!("         🔧 修复成功: {}", file_path.display());
+                                            } else {
+                                                println!("   ✅ 修复成功: {}", file_path.display());
                                             }
-                                            // 替换原始代码
-                                            new_content = new_content.replace(mermaid_code, &fixed_code);
+                                            // 精确按字节位置替换整个代码块（包含```mermaid和```标记）
+                                            let original_block = &new_content[*start_pos..*end_pos];
+                                            let fixed_block = format!("```mermaid\n{}\n```", fixed_code);
+                                            if original_block.len() == fixed_block.len() {
+                                                // 等长替换，安全直接覆盖
+                                                unsafe {
+                                                    let bytes = new_content.as_bytes_mut();
+                                                    bytes[*start_pos..*end_pos].copy_from_slice(fixed_block.as_bytes());
+                                                }
+                                            } else {
+                                                // 不等长，重建字符串
+                                                let prefix = &new_content[..*start_pos];
+                                                let suffix = &new_content[*end_pos..];
+                                                new_content = format!("{}{}{}", prefix, fixed_block, suffix);
+                                            }
                                             file_modified = true;
                                             fixed_blocks += 1;
                                         }
@@ -156,7 +176,7 @@ impl MermaidProcessor {
         if file_modified {
             std::fs::write(file_path, new_content)?;
             if self.verbose {
-                println!("   💾 文件已更新");
+                println!("   💾 文件已更新: {}", file_path.display());
             }
         }
 

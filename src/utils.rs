@@ -2,38 +2,37 @@
 /// 返回 (开始位置, 结束位置, 代码内容) 的元组列表
 pub fn extract_mermaid_blocks(content: &str) -> Vec<(usize, usize, String)> {
     let mut blocks = Vec::new();
-    let lines: Vec<&str> = content.lines().collect();
-    let mut i = 0;
-
-    while i < lines.len() {
-        let line = lines[i].trim();
+    
+    // 直接在原始字符串中搜索 ```mermaid 标记，避免 lines() 去除行尾符导致偏移计算错误
+    let mut search_start = 0;
+    while let Some(block_start) = content[search_start..].find("```mermaid") {
+        let abs_start = search_start + block_start;
         
-        // 查找mermaid代码块开始标记
-        if line == "```mermaid" {
-            let start_line = i;
-            i += 1;
-            let mut mermaid_lines = Vec::new();
+        // 找到块起始后的第一个换行符作为代码的起始
+        let code_start = match content[abs_start..].find('\n') {
+            Some(pos) => abs_start + pos + 1,
+            None => break,
+        };
+        
+        // 从 abs_start 之后找 "```" 作为块结束
+        let after_block_start = abs_start + 8; // "```mermaid" 长度
+        if let Some(end_marker) = content[after_block_start..].find("```") {
+            let abs_end_marker = after_block_start + end_marker;
             
-            // 收集mermaid代码直到结束标记
-            while i < lines.len() {
-                let current_line = lines[i];
-                if current_line.trim() == "```" {
-                    // 找到结束标记
-                    let end_line = i;
-                    let mermaid_code = mermaid_lines.join("\n");
-                    
-                    // 计算在原始内容中的位置
-                    let start_pos = lines[..start_line].iter().map(|l| l.len() + 1).sum::<usize>();
-                    let end_pos = lines[..=end_line].iter().map(|l| l.len() + 1).sum::<usize>();
-                    
-                    blocks.push((start_pos, end_pos, mermaid_code));
-                    break;
-                }
-                mermaid_lines.push(current_line);
-                i += 1;
-            }
+            // 收集代码内容：从 code_start 到 abs_end_marker
+            let mermaid_code = content[code_start..abs_end_marker].to_string();
+            
+            // end_pos 需要包含结束 ``` 所在的行尾符
+            let block_end = match content[abs_end_marker..].find('\n') {
+                Some(pos) => abs_end_marker + pos + 1,
+                None => content.len(),
+            };
+            
+            blocks.push((abs_start, block_end, mermaid_code));
+            search_start = block_end;
+        } else {
+            search_start += 8;
         }
-        i += 1;
     }
 
     blocks
